@@ -104,9 +104,7 @@ async fn main(_spawner: Spawner) {
     let mut led_rosu = Output::new(p.PIN_28, Level::Low);
     let mut buzzer = Output::new(p.PIN_19, Level::Low);
 
-    let mut rng = 12345u32;
     let mut sequence: Vec<usize, 32> = Vec::new();
-
     let mut score_to_display_on_menu = 0;
     let mut first_run = true;
 
@@ -126,14 +124,8 @@ async fn main(_spawner: Spawner) {
             lcd.write_str("Press * to Play", &mut delay).unwrap();
         }
 
-        loop {
-            if let Some(c) = read_key(&mut rows, &cols, &keys).await {
-                if c == '*' {
-                    break;
-                }
-            }
-            Timer::after_millis(50).await;
-        }
+        let rng_seed = get_entropy_from_keys(&mut rows, &cols, &keys).await;
+        let mut rng = rng_seed;
 
         countdown(&mut lcd, &mut delay).await;
 
@@ -229,4 +221,25 @@ async fn read_key<'d>(
         row_pin.set_high();
     }
     None
+}
+
+async fn get_entropy_from_keys<'d>(
+    rows: &mut [Output<'d>; 4],
+    cols: &[Input<'d>; 4],
+    keys: &[[char; 4]; 4],
+) -> u32 {
+    let mut counter = 0u32;
+
+    loop {
+        Timer::after_millis(10).await;
+        counter = counter.wrapping_add(1);
+
+        if let Some(c) = read_key(rows, cols, keys).await {
+            if c == '*' {
+                break;
+            }
+        }
+    }
+
+    counter
 }
