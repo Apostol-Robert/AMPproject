@@ -17,6 +17,26 @@ use heapless::{String, Vec};
 use core::fmt::Write;
 use core::write;
 
+async fn blink_led(led: &mut Output<'_>, delay: &mut Delay) {
+    for _ in 0..3 {
+        led.set_high();
+        Timer::after_millis(100).await;
+        led.set_low();
+        Timer::after_millis(100).await;
+    }
+}
+
+async fn game_over_animation(led: &mut Output<'_>, buzzer: &mut Output<'_>, delay: &mut Delay) {
+    for _ in 0..3 {
+        led.set_high();
+        buzzer.set_high();
+        Timer::after_millis(300).await;
+        led.set_low();
+        buzzer.set_low();
+        Timer::after_millis(300).await;
+    }
+}
+
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
     let p = init(Default::default());
@@ -64,89 +84,107 @@ async fn main(_spawner: Spawner) {
         Output::new(p.PIN_18, Level::Low),
     ];
 
+    let mut led_verde = Output::new(p.PIN_27, Level::Low);
+    let mut led_rosu = Output::new(p.PIN_28, Level::Low);
+
     let mut buzzer = Output::new(p.PIN_19, Level::Low);
     let mut rng = 12345u32;
     let mut sequence: Vec<usize, 32> = Vec::new();
     let mut score = 0;
-    let mut game_started = false;
+
+    let mut waiting_for_start = true;
 
     loop {
-        if !game_started {
+        if waiting_for_start {
             lcd.clear(&mut delay).unwrap();
             lcd.write_str("Press * to start", &mut delay).unwrap();
 
             loop {
                 if let Some(c) = read_key(&mut rows, &cols, &keys).await {
                     if c == '*' {
-                        game_started = true;
                         break;
                     }
                 }
-                Timer::after_millis(20).await;
+                Timer::after_millis(50).await;
             }
+        }
 
+        waiting_for_start = true;
+        sequence.clear();
+        score = 0;
+
+        loop {
             lcd.clear(&mut delay).unwrap();
             lcd.write_str("Watch!", &mut delay).unwrap();
-            Timer::after_millis(500).await;
-        }
 
-        // Generează un nou LED
-        rng = rng.wrapping_mul(1664525).wrapping_add(1013904223);
-        let next = (rng as usize) % 9;
-        sequence.push(next).unwrap();
+            rng = rng.wrapping_mul(1664525).wrapping_add(1013904223);
+            let next = (rng as usize) % 9;
+            sequence.push(next).unwrap();
 
-        for &i in sequence.iter() {
-            leds[i].set_high();
-            Timer::after_millis(400).await;
-            leds[i].set_low();
-            Timer::after_millis(300).await;
-        }
-
-        lcd.clear(&mut delay).unwrap();
-        let mut msg: String<32> = String::new();
-        let _ = write!(msg, "Score: {}", score);
-        lcd.write_str(&msg, &mut delay).unwrap();
-        lcd.set_cursor_pos(0x40, &mut delay).unwrap();
-        lcd.write_str("Your turn!", &mut delay).unwrap();
-
-        let mut correct = true;
-
-        for &i in sequence.iter() {
-            let pressed = loop {
-                if let Some(c) = read_key(&mut rows, &cols, &keys).await {
-                    if let Some(idx) = char_to_index(c) {
-                        break idx;
-                    }
-                }
-                Timer::after_millis(20).await;
-            };
-
-            if pressed != i {
-                correct = false;
-                break;
+            for &i in sequence.iter() {
+                leds[i].set_high();
+                Timer::after_millis(400).await;
+                leds[i].set_low();
+                Timer::after_millis(300).await;
             }
 
-            leds[pressed].set_high();
-            Timer::after_millis(200).await;
-            leds[pressed].set_low();
-            Timer::after_millis(100).await;
-        }
-
-        if !correct {
             lcd.clear(&mut delay).unwrap();
             let mut msg: String<32> = String::new();
-            let _ = write!(msg, "NOO, SCORE: {}", score);
+            let _ = write!(msg, "Score: {}", score);
             lcd.write_str(&msg, &mut delay).unwrap();
-            buzzer.set_high();
-            Timer::after_millis(600).await;
-            buzzer.set_low();
-            sequence.clear();
-            score = 0;
-            game_started = false;
-            Timer::after_secs(2).await;
-        } else {
-            score += 1;
-            Timer::after_millis(1000).await;
+            lcd.set_cursor_pos(0x40, &mut delay).unwrap();
+            lcd.write_str("Your turn!", &mut delay).unwrap();
+
+            let mut correct = true;
+
+            for &i in sequence.iter() {
+                let pressed = loop {
+                    if let Some(c) = read_key(&mut rows, &cols, &keys).await {
+                        if let Some(idx) = char_to_index(c) {
+                            break idx;
+                        }
+                    }
+                    Timer::after_millis(20).await;
+                };
+
+                if pressed != i {
+                    correct = false;
+                    break;
+                }
+
+                leds[pressed].set_high();
+                Timer::after_millis(200).await;
+                leds[pressed].set_low();
+                Timer::after_millis(100).await;
+            }
+
+            if !correct {
+                lcd.clear(&mut delay).unwrap();
+                let mut msg: String<32> = String::new();
+                let _ = write!(msg, "NOO, SCORE: {}", score);
+                lcd.write_str(&msg, &mut delay).unwrap();
+                lcd.set_cursor_pos(0x40, &mut delay).unwrap();
+                lcd.write_str("Press * to start", &mut delay).unwrap();
+
+                game_over_animation(&mut led_rosu, &mut buzzer, &mut delay).await;
+
+                // Așteaptă apăsare *, apoi sare direct în joc fără să afișeze iar "Press * to start"
+                loop {
+                    if let Some(c) = read_key(&mut rows, &cols, &keys).await {
+                        if c == '*' {
+                            waiting_for_start = false;
+                            break;
+                        }
+                    }
+                    Timer::after_millis(50).await;
+                }
+
+                break;
+            } else {
+                score += 1;
+                blink_led(&mut led_verde, &mut delay).await;
+                Timer::after_millis(1000).await;
+            }
         }
     }
 }
