@@ -40,6 +40,28 @@ async fn game_over_animation(led: &mut Output<'_>, buzzer: &mut Output<'_>, _del
     }
 }
 
+async fn task_complete_effect(leds: &mut [Output<'_>; 9], duration_ms: u64) {
+    let start = embassy_time::Instant::now();
+    while embassy_time::Instant::now() - start < embassy_time::Duration::from_millis(duration_ms) {
+        for i in 0..leds.len() {
+            leds[i].set_high();
+            if i >= 1 {
+                leds[i - 1].set_low();
+            }
+            Timer::after_millis(70).await;
+        }
+        leds[leds.len() - 1].set_low();
+        for i in (0..leds.len()).rev() {
+            leds[i].set_high();
+            if i + 1 < leds.len() {
+                leds[i + 1].set_low();
+            }
+            Timer::after_millis(70).await;
+        }
+        leds[0].set_low();
+    }
+}
+
 async fn countdown(
     lcd: &mut HD44780<I2CBus<I2c<'static, I2C0, Blocking>>>,
     delay: &mut Delay,
@@ -107,6 +129,7 @@ async fn main(_spawner: Spawner) {
     let mut sequence: Vec<usize, 32> = Vec::new();
     let mut score_to_display_on_menu = 0;
     let mut first_run = true;
+    let max_rounds = 3;
 
     loop {
         lcd.clear(&mut delay).unwrap();
@@ -117,9 +140,8 @@ async fn main(_spawner: Spawner) {
             first_run = false;
         } else {
             let mut msg_line1: String<32> = String::new();
-            let _ = write!(msg_line1, "NOO, SCORE: {}", score_to_display_on_menu);
+            let _ = write!(msg_line1, "GG, SCORE: {}", score_to_display_on_menu);
             lcd.write_str(&msg_line1, &mut delay).unwrap();
-
             lcd.set_cursor_pos(0x40, &mut delay).unwrap();
             lcd.write_str("Press * to Play", &mut delay).unwrap();
         }
@@ -183,6 +205,15 @@ async fn main(_spawner: Spawner) {
                 break;
             } else {
                 current_game_score += 1;
+                if current_game_score >= max_rounds {
+                    score_to_display_on_menu = current_game_score;
+                    lcd.clear(&mut delay).unwrap();
+                    lcd.write_str("TASK COMPLETE", &mut delay).unwrap();
+                    task_complete_effect(&mut leds, 10_000).await;
+                    lcd.clear(&mut delay).unwrap();
+                    lcd.write_str("Press * to Play", &mut delay).unwrap();
+                    break;
+                }
                 blink_led(&mut led_verde, &mut delay).await;
                 Timer::after_millis(1000).await;
             }
