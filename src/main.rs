@@ -129,7 +129,7 @@ async fn main(_spawner: Spawner) {
     let mut sequence: Vec<usize, 32> = Vec::new();
     let mut score_to_display_on_menu = 0;
     let mut first_run = true;
-    let max_rounds = 3;
+    let max_rounds = 10;
 
     loop {
         lcd.clear(&mut delay).unwrap();
